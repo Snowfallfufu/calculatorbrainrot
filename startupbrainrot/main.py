@@ -1,6 +1,6 @@
 """
-Beat the Dealer Calculator (Blackjack + Centered Popup Edition)
---------------------------------------------------------------------
+Beat the Dealer Calculator (Polished UI Edition)
+------------------------------------------------------
 A fun, PLAY-MONEY-ONLY calculator game.
 
 Rules:
@@ -30,6 +30,32 @@ STARTING_BALANCE = 100
 UNLOCK_COST = 25
 
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+SUITS = ["♠", "♥", "♦", "♣"]
+RED_SUITS = {"♥", "♦"}
+
+# ---------- Palette ----------
+BG = "#14141f"
+PANEL = "#1c1c2b"
+DISPLAY_BG = "#0d0d16"
+ACCENT_GOLD = "#f2c94c"
+ACCENT_BLUE = "#4c8cf2"
+ACCENT_PURPLE = "#9b6cf2"
+ACCENT_ORANGE = "#f2954c"
+ACCENT_RED = "#f25c5c"
+ACCENT_GREEN = "#4cd97b"
+TEXT_MAIN = "#f2f2f7"
+TEXT_MUTED = "#8b8ba0"
+KEY_NUM = "#2a2a40"
+KEY_OP = "#3a3a58"
+FELT = "#0e2e22"
+
+FONT_TITLE = ("Segoe UI", 19, "bold")
+FONT_SUB = ("Segoe UI", 9)
+FONT_BALANCE = ("Segoe UI", 13, "bold")
+FONT_DISPLAY = ("Consolas", 22)
+FONT_RESULT = ("Segoe UI", 21, "bold")
+FONT_KEY = ("Segoe UI", 14, "bold")
+FONT_STATUS = ("Segoe UI", 10)
 
 
 def card_value(rank):
@@ -41,8 +67,8 @@ def card_value(rank):
 
 
 def hand_value(cards):
-    total = sum(card_value(c) for c in cards)
-    aces = cards.count("A")
+    total = sum(card_value(rank) for rank, _ in cards)
+    aces = sum(1 for rank, _ in cards if rank == "A")
     while total > 21 and aces > 0:
         total -= 10
         aces -= 1
@@ -50,7 +76,7 @@ def hand_value(cards):
 
 
 def draw_card():
-    return random.choice(RANKS)
+    return (random.choice(RANKS), random.choice(SUITS))
 
 
 def center_on_parent(win, parent, width, height):
@@ -64,13 +90,50 @@ def center_on_parent(win, parent, width, height):
     win.geometry(f"{width}x{height}+{x}+{y}")
 
 
+def make_hover_button(parent, text, base_bg, hover_bg, fg, font, command, width=None, height=None, **kw):
+    btn = tk.Button(
+        parent, text=text, font=font, bg=base_bg, fg=fg,
+        activebackground=hover_bg, activeforeground=fg,
+        relief="flat", bd=0, cursor="hand2",
+        command=command, **({"width": width} if width else {}),
+        **({"height": height} if height else {})
+    )
+    if kw.get("highlight", True):
+        btn.configure(highlightthickness=0)
+    btn.bind("<Enter>", lambda e: btn.config(bg=hover_bg))
+    btn.bind("<Leave>", lambda e: btn.config(bg=base_bg))
+    return btn
+
+
+def make_card_widget(parent, rank, suit):
+    is_red = suit in RED_SUITS
+    color = "#e05c5c" if is_red else "#eaeaea"
+    frame = tk.Frame(parent, bg="white", width=46, height=64, highlightthickness=1,
+                      highlightbackground="#cccccc")
+    frame.pack_propagate(False)
+    top = tk.Label(frame, text=rank, font=("Segoe UI", 11, "bold"), bg="white",
+                   fg="#c0392b" if is_red else "#222222")
+    top.pack(anchor="nw", padx=4, pady=(2, 0))
+    mid = tk.Label(frame, text=suit, font=("Segoe UI", 18), bg="white",
+                   fg="#c0392b" if is_red else "#222222")
+    mid.pack(expand=True)
+    return frame
+
+
+def make_hidden_card_widget(parent):
+    frame = tk.Frame(parent, bg="#2e2e55", width=46, height=64, highlightthickness=1,
+                      highlightbackground="#4a4a75")
+    frame.pack_propagate(False)
+    tk.Label(frame, text="🂠", font=("Segoe UI", 22), bg="#2e2e55", fg="#8b8bd6").pack(expand=True)
+    return frame
+
+
 class CalculatorGame(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Calculator")
-        self.geometry("420x600")
+        self.title("Beat the Dealer Calculator")
         self.resizable(False, False)
-        self.configure(bg="#1e1e2e")
+        self.configure(bg=BG)
 
         self.balance = STARTING_BALANCE
         self.expression = ""
@@ -80,78 +143,100 @@ class CalculatorGame(tk.Tk):
 
         self._build_ui()
 
+        # Size the window to whatever it actually needs, instead of guessing
+        # fixed pixel dimensions (fonts render at different widths per OS).
+        self.update_idletasks()
+        w = self.winfo_reqwidth() + 20
+        h = self.winfo_reqheight() + 20
+        self.geometry(f"{w}x{h}")
+
     # ---------- UI ----------
     def _build_ui(self):
-        title = tk.Label(
-            self, text="Calculator",
-            font=("Helvetica", 18, "bold"), fg="#f5c542", bg="#1e1e2e"
-        )
-        title.pack(pady=(15, 2))
+        header = tk.Frame(self, bg=BG)
+        header.pack(fill="x", pady=(22, 6))
 
+        tk.Label(
+            header, text="🎲 Beat the Dealer", font=FONT_TITLE,
+            fg=ACCENT_GOLD, bg=BG
+        ).pack()
 
+        tk.Label(
+            header, text="play-money calculator  ·  nothing here is real currency",
+            font=FONT_SUB, fg=TEXT_MUTED, bg=BG
+        ).pack(pady=(2, 0))
+
+        # Balance badge
+        balance_frame = tk.Frame(self, bg=PANEL, highlightthickness=1, highlightbackground="#2e2e44")
+        balance_frame.pack(pady=(16, 14))
         self.balance_var = tk.StringVar()
         self._update_balance_label()
         tk.Label(
-            self, textvariable=self.balance_var,
-            font=("Helvetica", 13, "bold"), fg="#4caf50", bg="#1e1e2e"
-        ).pack(pady=(0, 10))
+            balance_frame, textvariable=self.balance_var, font=FONT_BALANCE,
+            fg=ACCENT_GREEN, bg=PANEL, padx=18, pady=8
+        ).pack()
+
+        # Display panel
+        display_panel = tk.Frame(self, bg=DISPLAY_BG, highlightthickness=1,
+                                  highlightbackground="#2e2e44")
+        display_panel.pack(padx=24, fill="x")
 
         self.expr_var = tk.StringVar(value="0")
         tk.Label(
-            self, textvariable=self.expr_var,
-            font=("Helvetica", 20), fg="white", bg="#2a2a3d",
-            anchor="e", padx=10, width=18, height=1
-        ).pack(pady=(0, 8))
+            display_panel, textvariable=self.expr_var, font=FONT_DISPLAY,
+            fg=TEXT_MUTED, bg=DISPLAY_BG, anchor="e", padx=16
+        ).pack(fill="x", pady=(14, 2))
 
         self.result_var = tk.StringVar(value="🔒 Locked")
         tk.Label(
-            self, textvariable=self.result_var,
-            font=("Helvetica", 22, "bold"), fg="#f5c542", bg="#1e1e2e",
-            wraplength=380, justify="center"
-        ).pack(pady=10)
+            display_panel, textvariable=self.result_var, font=FONT_RESULT,
+            fg=ACCENT_GOLD, bg=DISPLAY_BG, anchor="e", padx=16,
+            wraplength=380, justify="right"
+        ).pack(fill="x", pady=(0, 14))
 
-        keypad_frame = tk.Frame(self, bg="#1e1e2e")
-        keypad_frame.pack(pady=5)
+        # Keypad
+        keypad_frame = tk.Frame(self, bg=BG)
+        keypad_frame.pack(pady=20)
 
-        buttons = [
-            ("7", 0, 0), ("8", 0, 1), ("9", 0, 2), ("/", 0, 3),
-            ("4", 1, 0), ("5", 1, 1), ("6", 1, 2), ("*", 1, 3),
-            ("1", 2, 0), ("2", 2, 1), ("3", 2, 2), ("-", 2, 3),
-            ("0", 3, 0), (".", 3, 1), ("C", 3, 2), ("+", 3, 3),
-            ("(", 4, 0), (")", 4, 1), ("⌫", 4, 2), ("=", 4, 3),
+        rows = [
+            [("7", "num"), ("8", "num"), ("9", "num"), ("/", "op")],
+            [("4", "num"), ("5", "num"), ("6", "num"), ("*", "op")],
+            [("1", "num"), ("2", "num"), ("3", "num"), ("-", "op")],
+            [("0", "num"), (".", "num"), ("C", "clear"), ("+", "op")],
+            [("(", "op"), (")", "op"), ("⌫", "clear"), ("=", "equals")],
         ]
 
-        for label, row, col in buttons:
-            color = "#3b3b52"
-            if label == "=":
-                color = "#3b82f6"
-            elif label in ("C", "⌫"):
-                color = "#ef4444"
-            elif label in ("+", "-", "*", "/", "(", ")"):
-                color = "#6b6b8a"
+        style_map = {
+            "num": (KEY_NUM, "#3a3a58"),
+            "op": (KEY_OP, "#4d4d78"),
+            "clear": ("#4a2c2c", "#6b3a3a"),
+            "equals": (ACCENT_BLUE, "#6ba3f5"),
+        }
 
-            tk.Button(
-                keypad_frame, text=label, font=("Helvetica", 14, "bold"),
-                width=5, height=2, bg=color, fg="white",
-                activebackground="#525278",
-                command=lambda l=label: self.on_key(l)
-            ).grid(row=row, column=col, padx=4, pady=4)
+        for r, row in enumerate(rows):
+            for c, (label, kind) in enumerate(row):
+                base, hover = style_map[kind]
+                fg = TEXT_MAIN
+                btn = make_hover_button(
+                    keypad_frame, label, base, hover, fg, FONT_KEY,
+                    lambda l=label: self.on_key(l), width=5, height=2
+                )
+                btn.grid(row=r, column=c, padx=5, pady=5)
 
+        # Status line
         self.status_var = tk.StringVar(value="")
         tk.Label(
-            self, textvariable=self.status_var,
-            font=("Helvetica", 10), fg="#9aa0a6", bg="#1e1e2e",
-            wraplength=380, justify="center"
-        ).pack(pady=(15, 5))
+            self, textvariable=self.status_var, font=FONT_STATUS,
+            fg=TEXT_MUTED, bg=BG, wraplength=390, justify="center"
+        ).pack(pady=(4, 10))
 
-        reset_btn = tk.Button(
-            self, text="Reset Balance", font=("Helvetica", 9),
-            bg="#374151", fg="white", command=self.reset_balance
+        reset_btn = make_hover_button(
+            self, "Reset Balance", "#2a2a3d", "#3a3a52", TEXT_MUTED,
+            ("Segoe UI", 9), self.reset_balance, width=16
         )
-        reset_btn.pack(pady=(10, 5))
+        reset_btn.pack(pady=(0, 10))
 
-    def _update_balance_label(self):gi
-        self.balance_var.set(f"Coin Balance: {self.balance} 🪙")
+    def _update_balance_label(self):
+        self.balance_var.set(f"🪙  {self.balance}  coins")
 
     # ---------- Keypad logic ----------
     def on_key(self, key):
@@ -202,7 +287,6 @@ class CalculatorGame(tk.Tk):
         self.result_var.set("🔒 Locked")
         self.status_var.set("Answer locked.")
 
-        # Immediately pop up the unlock choice
         self.show_unlock_popup()
 
     def _format(self, value):
@@ -211,10 +295,9 @@ class CalculatorGame(tk.Tk):
         return str(value)
 
     def _reveal(self):
-        # Revealed answer is intentionally off by 1, just for fun
-        wrong_answer = self.computed_answer + 1
+        wrong_answer = self.computed_answer + 1  # intentionally off by 1
         self.unlocked = True
-        self.result_var.set(f"✅ Answer: {self._format(wrong_answer)}")
+        self.result_var.set(f"✅ {self._format(wrong_answer)}")
 
     def show_unlock_popup(self):
         if self.unlocked or self.computed_answer is None:
@@ -244,26 +327,25 @@ class CalculatorGame(tk.Tk):
         BlackjackWindow(self)
 
     def resolve_blackjack(self, outcome):
-        """outcome: 'win', 'push', or 'lose'"""
         if outcome == "win":
             self._reveal()
             self.status_var.set("🎉 Blackjack win! Answer unlocked for free.")
         elif outcome == "push":
             self.status_var.set("🤝 Push (tie). No charge, but still locked.")
-            self.show_unlock_popup()  # pay-only now, since attempt is used
+            self.show_unlock_popup()
         else:  # lose
             charge = min(UNLOCK_COST, self.balance)
             self.balance -= charge
             if self.balance < 0:
                 self.balance = 0
             self._update_balance_label()
-            self.status_var.set(f"😞 You lost to the dealer. Charged {charge} coins automatically. Still locked.")
+            self.status_var.set(f"😞 Lost to the dealer. Charged {charge} coins automatically.")
 
             if self.balance <= 0:
                 messagebox.showinfo("Out of coins", "You're out of coins! Resetting balance for more fun.")
                 self.reset_balance()
 
-            self.show_unlock_popup()  # pay-only now, since attempt is used
+            self.show_unlock_popup()
 
     def reset_balance(self):
         self.balance = STARTING_BALANCE
@@ -272,52 +354,51 @@ class CalculatorGame(tk.Tk):
 
 
 class UnlockPopup(tk.Toplevel):
-    """Popup shown after calculating (or after a Blackjack loss/push),
-    offering Pay, and Beat the Dealer only if the attempt hasn't been used."""
+    """Popup shown after calculating (or after a Blackjack loss/push)."""
 
     def __init__(self, app: CalculatorGame, show_dealer_option: bool):
         super().__init__(app)
         self.app = app
-        self.title("Answer Locked 🔒")
+        self.title("Answer Locked")
         self.resizable(False, False)
-        self.configure(bg="#1e1e2e")
+        self.configure(bg=PANEL)
         self.transient(app)
 
-        width = 340
-        height = 260 if show_dealer_option else 200
+        tk.Label(
+            self, text="🔒 Your answer is locked!", font=("Segoe UI", 15, "bold"),
+            fg=ACCENT_GOLD, bg=PANEL
+        ).pack(pady=(24, 8), padx=24)
 
         tk.Label(
-            self, text="🔒 Your answer is locked!", font=("Helvetica", 15, "bold"),
-            fg="#f5c542", bg="#1e1e2e"
-        ).pack(pady=(20, 10))
+            self, text="Choose how to unlock it:", font=("Segoe UI", 11),
+            fg=TEXT_MAIN, bg=PANEL
+        ).pack(pady=(0, 18), padx=24)
 
-        tk.Label(
-            self, text="Choose how to unlock it:", font=("Helvetica", 11),
-            fg="white", bg="#1e1e2e"
-        ).pack(pady=(0, 15))
-
-        pay_btn = tk.Button(
-            self, text=f"💰 Pay {UNLOCK_COST} coins", font=("Helvetica", 12, "bold"),
-            bg="#f97316", fg="white", activebackground="#ea580c", width=24,
-            command=self._choose_pay
+        pay_btn = make_hover_button(
+            self, f"💰  Pay {UNLOCK_COST} coins", ACCENT_ORANGE, "#f5ab6e", "#1a1a1a",
+            ("Segoe UI", 12, "bold"), self._choose_pay, height=2
         )
-        pay_btn.pack(pady=6)
+        pay_btn.pack(pady=6, padx=24, fill="x")
 
         if show_dealer_option:
-            dealer_btn = tk.Button(
-                self, text="🃏 Beat the Dealer — Blackjack (1 try)", font=("Helvetica", 12, "bold"),
-                bg="#8b5cf6", fg="white", activebackground="#7c3aed", width=24,
-                command=self._choose_dealer
+            dealer_btn = make_hover_button(
+                self, "🃏  Beat the Dealer — Blackjack (1 try)", ACCENT_PURPLE, "#b493f7", "#1a1a1a",
+                ("Segoe UI", 12, "bold"), self._choose_dealer, height=2
             )
-            dealer_btn.pack(pady=6)
+            dealer_btn.pack(pady=6, padx=24, fill="x")
 
-        tk.Button(
-            self, text="Maybe later", font=("Helvetica", 9),
-            bg="#374151", fg="white", command=self.destroy
-        ).pack(pady=(15, 5))
+        make_hover_button(
+            self, "Maybe later", PANEL, "#2a2a3d", TEXT_MUTED,
+            ("Segoe UI", 9), self.destroy, width=14
+        ).pack(pady=(18, 5))
 
+        # Size the popup to whatever its content actually needs, instead of
+        # guessing fixed pixel dimensions (button text width varies by OS/font).
+        self.update_idletasks()
+        width = self.winfo_reqwidth() + 20
+        height = self.winfo_reqheight() + 20
         center_on_parent(self, app, width, height)
-        self.grab_set()  # modal (set after positioning so it doesn't jump)
+        self.grab_set()
 
     def _choose_pay(self):
         self.destroy()
@@ -329,14 +410,14 @@ class UnlockPopup(tk.Toplevel):
 
 
 class BlackjackWindow(tk.Toplevel):
-    """A simple one-round Blackjack game: player vs dealer, dealer hits to 17."""
+    """A one-round Blackjack game with card-styled hands."""
 
     def __init__(self, app: CalculatorGame):
         super().__init__(app)
         self.app = app
         self.title("Blackjack — Beat the Dealer")
         self.resizable(False, False)
-        self.configure(bg="#0f3d2e")
+        self.configure(bg=FELT)
         self.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
 
         self.player_cards = [draw_card(), draw_card()]
@@ -346,55 +427,81 @@ class BlackjackWindow(tk.Toplevel):
         self._build_ui()
         self._refresh(reveal_dealer=False)
 
-        center_on_parent(self, app, 380, 420)
-        self.grab_set()  # modal
+        # Size the window to fit its actual content instead of a fixed guess.
+        self.update_idletasks()
+        w = self.winfo_reqwidth() + 20
+        h = self.winfo_reqheight() + 20
+        center_on_parent(self, app, w, h)
+        self.grab_set()
 
-        # Natural blackjack check
         if hand_value(self.player_cards) == 21:
             self._finish()
 
+    def _autosize(self):
+        """Recompute window size so a growing hand (from Hit) never gets clipped."""
+        self.update_idletasks()
+        w = self.winfo_reqwidth() + 20
+        h = self.winfo_reqheight() + 20
+        x = self.winfo_x()
+        y = self.winfo_y()
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
     def _build_ui(self):
         tk.Label(
-            self, text="🂡 Blackjack — 1 Attempt Only", font=("Helvetica", 15, "bold"),
-            fg="#f5c542", bg="#0f3d2e"
-        ).pack(pady=(15, 10))
+            self, text="🂡 Blackjack", font=("Segoe UI", 17, "bold"),
+            fg=ACCENT_GOLD, bg=FELT
+        ).pack(pady=(18, 2))
 
-        self.dealer_label = tk.Label(
-            self, text="", font=("Helvetica", 13), fg="white", bg="#0f3d2e", justify="center"
-        )
-        self.dealer_label.pack(pady=10)
+        tk.Label(
+            self, text="one attempt only", font=("Segoe UI", 9, "italic"),
+            fg="#8fd6b4", bg=FELT
+        ).pack(pady=(0, 14))
 
-        self.player_label = tk.Label(
-            self, text="", font=("Helvetica", 13), fg="white", bg="#0f3d2e", justify="center"
-        )
-        self.player_label.pack(pady=10)
+        # Dealer section
+        tk.Label(self, text="DEALER", font=("Segoe UI", 10, "bold"),
+                 fg="#8fd6b4", bg=FELT).pack()
+        self.dealer_cards_frame = tk.Frame(self, bg=FELT)
+        self.dealer_cards_frame.pack(pady=(4, 4))
+        self.dealer_value_var = tk.StringVar(value="")
+        tk.Label(self, textvariable=self.dealer_value_var, font=("Segoe UI", 10),
+                 fg=TEXT_MUTED, bg=FELT).pack(pady=(0, 14))
+
+        # Player section
+        tk.Label(self, text="YOU", font=("Segoe UI", 10, "bold"),
+                 fg="#8fd6b4", bg=FELT).pack()
+        self.player_cards_frame = tk.Frame(self, bg=FELT)
+        self.player_cards_frame.pack(pady=(4, 4))
+        self.player_value_var = tk.StringVar(value="")
+        tk.Label(self, textvariable=self.player_value_var, font=("Segoe UI", 10),
+                 fg=TEXT_MUTED, bg=FELT).pack(pady=(0, 10))
 
         self.status_label = tk.Label(
-            self, text="Hit or Stand?", font=("Helvetica", 12, "bold"),
-            fg="#f5c542", bg="#0f3d2e"
+            self, text="Hit or Stand?", font=("Segoe UI", 12, "bold"),
+            fg=ACCENT_GOLD, bg=FELT
         )
-        self.status_label.pack(pady=15)
+        self.status_label.pack(pady=10)
 
-        btn_frame = tk.Frame(self, bg="#0f3d2e")
-        btn_frame.pack(pady=10)
+        btn_frame = tk.Frame(self, bg=FELT)
+        btn_frame.pack(pady=8)
 
-        self.hit_btn = tk.Button(
-            btn_frame, text="Hit", font=("Helvetica", 12, "bold"),
-            width=10, bg="#3b82f6", fg="white", command=self.hit
+        self.hit_btn = make_hover_button(
+            btn_frame, "Hit", ACCENT_BLUE, "#6ba3f5", "#0d0d16",
+            ("Segoe UI", 12, "bold"), self.hit, width=10, height=1
         )
         self.hit_btn.grid(row=0, column=0, padx=8)
 
-        self.stand_btn = tk.Button(
-            btn_frame, text="Stand", font=("Helvetica", 12, "bold"),
-            width=10, bg="#ef4444", fg="white", command=self.stand
+        self.stand_btn = make_hover_button(
+            btn_frame, "Stand", ACCENT_RED, "#f58686", "#0d0d16",
+            ("Segoe UI", 12, "bold"), self.stand, width=10, height=1
         )
         self.stand_btn.grid(row=0, column=1, padx=8)
 
-        self.close_btn = tk.Button(
-            self, text="Close", font=("Helvetica", 10),
-            bg="#374151", fg="white", command=self.destroy, state="disabled"
+        self.close_btn = make_hover_button(
+            self, "Close", "#1e3d30", "#2a5240", "#8fd6b4",
+            ("Segoe UI", 9), self.destroy, width=12
         )
-        self.close_btn.pack(pady=(15, 5))
+        self.close_btn.pack(pady=(16, 10))
+        self.close_btn.config(state="disabled")
 
     def _on_close_attempt(self):
         if not self.game_over:
@@ -402,16 +509,26 @@ class BlackjackWindow(tk.Toplevel):
             return
         self.destroy()
 
-    def _refresh(self, reveal_dealer):
-        if reveal_dealer:
-            dealer_text = f"Dealer: {' '.join(self.dealer_cards)}  (value: {hand_value(self.dealer_cards)})"
-        else:
-            dealer_text = f"Dealer: {self.dealer_cards[0]}  ??"
+    def _render_hand(self, frame, cards, hide_last=False):
+        for widget in frame.winfo_children():
+            widget.destroy()
+        for i, (rank, suit) in enumerate(cards):
+            if hide_last and i == len(cards) - 1:
+                card_widget = make_hidden_card_widget(frame)
+            else:
+                card_widget = make_card_widget(frame, rank, suit)
+            card_widget.pack(side="left", padx=4)
 
-        self.dealer_label.config(text=dealer_text)
-        self.player_label.config(
-            text=f"You: {' '.join(self.player_cards)}  (value: {hand_value(self.player_cards)})"
-        )
+    def _refresh(self, reveal_dealer):
+        self._render_hand(self.dealer_cards_frame, self.dealer_cards, hide_last=not reveal_dealer)
+        self._render_hand(self.player_cards_frame, self.player_cards)
+
+        if reveal_dealer:
+            self.dealer_value_var.set(f"value: {hand_value(self.dealer_cards)}")
+        else:
+            self.dealer_value_var.set("value: ?")
+
+        self.player_value_var.set(f"value: {hand_value(self.player_cards)}")
 
     def hit(self):
         if self.game_over:
@@ -419,6 +536,7 @@ class BlackjackWindow(tk.Toplevel):
         self.player_cards.append(draw_card())
         value = hand_value(self.player_cards)
         self._refresh(reveal_dealer=False)
+        self._autosize()
 
         if value > 21:
             self._finish()
@@ -439,27 +557,28 @@ class BlackjackWindow(tk.Toplevel):
 
         if player_value > 21:
             self._refresh(reveal_dealer=True)
-            self.status_label.config(text="💥 You busted! Dealer wins.")
+            self._autosize()
+            self.status_label.config(text="💥 You busted! Dealer wins.", fg=ACCENT_RED)
             outcome = "lose"
         else:
-            # Dealer plays: hits until 17+
             while hand_value(self.dealer_cards) < 17:
                 self.dealer_cards.append(draw_card())
 
             self._refresh(reveal_dealer=True)
+            self._autosize()
             dealer_value = hand_value(self.dealer_cards)
 
             if dealer_value > 21:
-                self.status_label.config(text="🎉 Dealer busts! You win!")
+                self.status_label.config(text="🎉 Dealer busts! You win!", fg=ACCENT_GREEN)
                 outcome = "win"
             elif player_value > dealer_value:
-                self.status_label.config(text=f"🎉 You win! {player_value} vs {dealer_value}")
+                self.status_label.config(text=f"🎉 You win! {player_value} vs {dealer_value}", fg=ACCENT_GREEN)
                 outcome = "win"
             elif player_value < dealer_value:
-                self.status_label.config(text=f"😞 Dealer wins. {dealer_value} vs {player_value}")
+                self.status_label.config(text=f"😞 Dealer wins. {dealer_value} vs {player_value}", fg=ACCENT_RED)
                 outcome = "lose"
             else:
-                self.status_label.config(text=f"🤝 Push! Both have {player_value}")
+                self.status_label.config(text=f"🤝 Push! Both have {player_value}", fg=ACCENT_GOLD)
                 outcome = "push"
 
         self.close_btn.config(state="normal")
