@@ -1,18 +1,20 @@
 """
-Beat the Dealer Calculator (Blackjack + Popup Edition)
----------------------------------------------------------
+Beat the Dealer Calculator (Blackjack + Centered Popup Edition)
+--------------------------------------------------------------------
 A fun, PLAY-MONEY-ONLY calculator game.
 
 Rules:
   - Tap digits/operators on the on-screen keypad to build an expression.
-  - Hit "=" to lock in the calculation. A POPUP appears with two choices:
+  - Hit "=" to lock in the calculation. A POPUP appears (centered on the
+    window) with two choices:
       a) Pay 25 coins to unlock instantly, or
       b) Play ONE round of Blackjack against the dealer.
          - You may only play Blackjack ONCE per calculation.
          - Win / Blackjack -> unlocks for FREE.
-         - Push (tie)      -> stays locked, no charge (popup can be reopened to pay).
-         - Lose / Bust     -> you are automatically charged 25 coins, stays locked.
-  - If you close the popup without choosing, tap "🔓 Unlock Options" to bring it back.
+         - Push (tie)      -> the Answer Locked popup reappears (pay-only,
+                               since your one Blackjack try is used).
+         - Lose / Bust     -> you are automatically charged 25 coins, and
+                               the Answer Locked popup reappears (pay-only).
   - The revealed answer is intentionally off by 1, just for fun.
 
 No real money, no real payments, no network calls. Everything is local
@@ -51,11 +53,22 @@ def draw_card():
     return random.choice(RANKS)
 
 
+def center_on_parent(win, parent, width, height):
+    win.update_idletasks()
+    px = parent.winfo_rootx()
+    py = parent.winfo_rooty()
+    pw = parent.winfo_width()
+    ph = parent.winfo_height()
+    x = px + (pw - width) // 2
+    y = py + (ph - height) // 2
+    win.geometry(f"{width}x{height}+{x}+{y}")
+
+
 class CalculatorGame(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Beat the Dealer Calculator (Play Money Only)")
-        self.geometry("420x640")
+        self.title("Calculator")
+        self.geometry("420x600")
         self.resizable(False, False)
         self.configure(bg="#1e1e2e")
 
@@ -70,16 +83,11 @@ class CalculatorGame(tk.Tk):
     # ---------- UI ----------
     def _build_ui(self):
         title = tk.Label(
-            self, text="🎲 Beat the Dealer Calculator",
+            self, text="Calculator",
             font=("Helvetica", 18, "bold"), fg="#f5c542", bg="#1e1e2e"
         )
         title.pack(pady=(15, 2))
 
-        subtitle = tk.Label(
-            self, text="(Play money only — nothing here is real currency)",
-            font=("Helvetica", 9, "italic"), fg="#9aa0a6", bg="#1e1e2e"
-        )
-        subtitle.pack(pady=(0, 10))
 
         self.balance_var = tk.StringVar()
         self._update_balance_label()
@@ -129,20 +137,12 @@ class CalculatorGame(tk.Tk):
                 command=lambda l=label: self.on_key(l)
             ).grid(row=row, column=col, padx=4, pady=4)
 
-        # Single button to reopen the unlock popup if dismissed
-        self.unlock_options_btn = tk.Button(
-            self, text="🔓 Unlock Options", font=("Helvetica", 11, "bold"),
-            bg="#f97316", fg="white", activebackground="#ea580c", width=28,
-            command=self.show_unlock_popup, state="disabled"
-        )
-        self.unlock_options_btn.pack(pady=15)
-
         self.status_var = tk.StringVar(value="")
         tk.Label(
             self, textvariable=self.status_var,
             font=("Helvetica", 10), fg="#9aa0a6", bg="#1e1e2e",
             wraplength=380, justify="center"
-        ).pack(pady=(5, 5))
+        ).pack(pady=(15, 5))
 
         reset_btn = tk.Button(
             self, text="Reset Balance", font=("Helvetica", 9),
@@ -150,8 +150,8 @@ class CalculatorGame(tk.Tk):
         )
         reset_btn.pack(pady=(10, 5))
 
-    def _update_balance_label(self):
-        self.balance_var.set(f"Coin Balance: {self.balance} 🪙  (play money)")
+    def _update_balance_label(self):gi
+        self.balance_var.set(f"Coin Balance: {self.balance} 🪙")
 
     # ---------- Keypad logic ----------
     def on_key(self, key):
@@ -179,7 +179,6 @@ class CalculatorGame(tk.Tk):
         self.dealer_attempt_used = False
         self.result_var.set("🔒 Locked")
         self.status_var.set("")
-        self.unlock_options_btn.config(state="disabled")
 
     def calculate(self):
         expr = self.expression.strip()
@@ -202,7 +201,6 @@ class CalculatorGame(tk.Tk):
 
         self.result_var.set("🔒 Locked")
         self.status_var.set("Answer locked.")
-        self.unlock_options_btn.config(state="normal")
 
         # Immediately pop up the unlock choice
         self.show_unlock_popup()
@@ -217,12 +215,11 @@ class CalculatorGame(tk.Tk):
         wrong_answer = self.computed_answer + 1
         self.unlocked = True
         self.result_var.set(f"✅ Answer: {self._format(wrong_answer)}")
-        self.unlock_options_btn.config(state="disabled")
 
     def show_unlock_popup(self):
         if self.unlocked or self.computed_answer is None:
             return
-        UnlockPopup(self)
+        UnlockPopup(self, show_dealer_option=not self.dealer_attempt_used)
 
     def pay_to_unlock(self):
         if self.unlocked or self.computed_answer is None:
@@ -241,7 +238,6 @@ class CalculatorGame(tk.Tk):
         if self.unlocked or self.computed_answer is None:
             return
         if self.dealer_attempt_used:
-            messagebox.showinfo("Already used", "You already used your one Blackjack attempt for this answer.")
             return
 
         self.dealer_attempt_used = True
@@ -254,6 +250,7 @@ class CalculatorGame(tk.Tk):
             self.status_var.set("🎉 Blackjack win! Answer unlocked for free.")
         elif outcome == "push":
             self.status_var.set("🤝 Push (tie). No charge, but still locked.")
+            self.show_unlock_popup()  # pay-only now, since attempt is used
         else:  # lose
             charge = min(UNLOCK_COST, self.balance)
             self.balance -= charge
@@ -266,6 +263,8 @@ class CalculatorGame(tk.Tk):
                 messagebox.showinfo("Out of coins", "You're out of coins! Resetting balance for more fun.")
                 self.reset_balance()
 
+            self.show_unlock_popup()  # pay-only now, since attempt is used
+
     def reset_balance(self):
         self.balance = STARTING_BALANCE
         self._update_balance_label()
@@ -273,17 +272,19 @@ class CalculatorGame(tk.Tk):
 
 
 class UnlockPopup(tk.Toplevel):
-    """Popup shown right after calculating, offering Pay or Beat the Dealer."""
+    """Popup shown after calculating (or after a Blackjack loss/push),
+    offering Pay, and Beat the Dealer only if the attempt hasn't been used."""
 
-    def __init__(self, app: CalculatorGame):
+    def __init__(self, app: CalculatorGame, show_dealer_option: bool):
         super().__init__(app)
         self.app = app
         self.title("Answer Locked 🔒")
-        self.geometry("340x260")
         self.resizable(False, False)
         self.configure(bg="#1e1e2e")
-        self.grab_set()  # modal
         self.transient(app)
+
+        width = 340
+        height = 260 if show_dealer_option else 200
 
         tk.Label(
             self, text="🔒 Your answer is locked!", font=("Helvetica", 15, "bold"),
@@ -302,20 +303,21 @@ class UnlockPopup(tk.Toplevel):
         )
         pay_btn.pack(pady=6)
 
-        dealer_state = "disabled" if app.dealer_attempt_used else "normal"
-        dealer_text = "🃏 Attempt already used" if app.dealer_attempt_used else "🃏 Beat the Dealer — Blackjack (1 try)"
-
-        dealer_btn = tk.Button(
-            self, text=dealer_text, font=("Helvetica", 12, "bold"),
-            bg="#8b5cf6", fg="white", activebackground="#7c3aed", width=24,
-            command=self._choose_dealer, state=dealer_state
-        )
-        dealer_btn.pack(pady=6)
+        if show_dealer_option:
+            dealer_btn = tk.Button(
+                self, text="🃏 Beat the Dealer — Blackjack (1 try)", font=("Helvetica", 12, "bold"),
+                bg="#8b5cf6", fg="white", activebackground="#7c3aed", width=24,
+                command=self._choose_dealer
+            )
+            dealer_btn.pack(pady=6)
 
         tk.Button(
             self, text="Maybe later", font=("Helvetica", 9),
             bg="#374151", fg="white", command=self.destroy
         ).pack(pady=(15, 5))
+
+        center_on_parent(self, app, width, height)
+        self.grab_set()  # modal (set after positioning so it doesn't jump)
 
     def _choose_pay(self):
         self.destroy()
@@ -333,11 +335,9 @@ class BlackjackWindow(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.title("Blackjack — Beat the Dealer")
-        self.geometry("380x420")
         self.resizable(False, False)
         self.configure(bg="#0f3d2e")
         self.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
-        self.grab_set()  # modal
 
         self.player_cards = [draw_card(), draw_card()]
         self.dealer_cards = [draw_card(), draw_card()]
@@ -345,6 +345,9 @@ class BlackjackWindow(tk.Toplevel):
 
         self._build_ui()
         self._refresh(reveal_dealer=False)
+
+        center_on_parent(self, app, 380, 420)
+        self.grab_set()  # modal
 
         # Natural blackjack check
         if hand_value(self.player_cards) == 21:
