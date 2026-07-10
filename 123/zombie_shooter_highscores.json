@@ -4,6 +4,10 @@
     "level": 9999
   },
   {
+    "score": 11060,
+    "level": 30
+  },
+  {
     "score": 2595,
     "level": 13
   },
@@ -14,13 +18,5 @@
   {
     "score": 300,
     "level": 4
-  },
-  {
-    "score": 210,
-    "level": 3
-  },
-  {
-    "score": 100,
-    "level": 2
   }
 ]

@@ -1,10 +1,10 @@
 """
-Zombie Shooter - Tactical AI & Player Depth Edition
-------------------------------------------------------
+Zombie Shooter - Sniper & Expanded Perks Edition
+---------------------------------------------------------------------------
 A top-down 2D zombie shooter built with Pygame, featuring:
   - Discrete levels (waves) that end once all zombies are cleared
   - A shop screen between levels to upgrade / unlock weapons
-  - Multiple weapons: Pistol, Shotgun, Rifle - each with magazine + reload
+  - Four weapons: Pistol, Shotgun, Rifle, and a piercing Sniper Rifle
   - A tough Boss zombie every 5th level, fought in an open arena layout
   - Persistent high scores saved to a local JSON file next to this script
   - Multiple wall/map layouts that rotate between levels
@@ -12,7 +12,9 @@ A top-down 2D zombie shooter built with Pygame, featuring:
   - A tactical "Spitter" enemy that checks line-of-sight, leads its shots
     based on your movement, and retreats to real cover after firing
   - A DASH (i-frame escape tool) and GRENADES (AoE crowd control)
-  - A PERK system: pick one random permanent bonus after every level
+  - An expanded PERK system: pick one random permanent bonus after every level
+  - EXPLOSIVE BARRELS that chain-detonate into zombies (and you, if close)
+  - GROUND PICKUPS (health / ammo) that occasionally drop from kills
 
 Controls:
     - WASD or Arrow Keys : Move
@@ -20,7 +22,7 @@ Controls:
     - Left Click (hold)  : Shoot
     - SPACE              : Dash (brief invulnerability + burst of speed)
     - G                  : Throw a grenade at your cursor
-    - 1 / 2 / 3          : Switch weapon (Pistol / Shotgun / Rifle)
+    - 1 / 2 / 3 / 4      : Switch weapon (Pistol / Shotgun / Rifle / Sniper)
     - R                  : Reload current weapon (during play)
     - In the shop screen : Number keys to buy upgrades / pick a perk,
                            ENTER to start next level
@@ -48,7 +50,7 @@ pygame.init()
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 960, 640
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Zomsho Project")
+pygame.display.set_caption("Zombie Shooter - Sniper & Expanded Perks Edition")
 clock = pygame.time.Clock()
 FPS = 60
 
@@ -78,6 +80,12 @@ GRENADE_COLOR = (70, 90, 40)
 GRENADE_DARK = (30, 50, 20)
 BLAST_COLOR = (255, 140, 40)
 BLAST_CORE = (255, 220, 120)
+BARREL_COLOR = (185, 65, 40)
+BARREL_DARK = (95, 25, 15)
+BARREL_WARN = (255, 210, 60)
+HEALTH_PICKUP = (220, 60, 60)
+AMMO_PICKUP = (230, 200, 60)
+SNIPER_COLOR = (210, 210, 235)
 BG_COLOR = (35, 40, 35)
 WALL_COLOR = (95, 92, 88)
 WALL_BORDER = (55, 52, 48)
@@ -101,22 +109,22 @@ def distance(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def move_with_collision(pos, delta, radius, walls):
+def move_with_collision(pos, delta, radius, obstacles):
     new_x = pos.x + delta.x
     rect = pygame.Rect(int(new_x - radius), int(pos.y - radius), int(radius * 2), int(radius * 2))
-    if not any(rect.colliderect(w.rect) for w in walls):
+    if not any(rect.colliderect(o.rect) for o in obstacles):
         pos.x = new_x
 
     new_y = pos.y + delta.y
     rect = pygame.Rect(int(pos.x - radius), int(new_y - radius), int(radius * 2), int(radius * 2))
-    if not any(rect.colliderect(w.rect) for w in walls):
+    if not any(rect.colliderect(o.rect) for o in obstacles):
         pos.y = new_y
 
 
 STEER_ANGLE_OFFSETS = [0, 25, -25, 50, -50, 75, -75, 100, -100, 130, -130, 160, -160]
 
 
-def steer_toward(pos, target_pos, speed, radius, walls):
+def steer_toward(pos, target_pos, speed, radius, obstacles):
     base_dir = pygame.Vector2(target_pos) - pos
     if base_dir.length_squared() == 0:
         return pygame.Vector2(0, 0)
@@ -132,13 +140,13 @@ def steer_toward(pos, target_pos, speed, radius, walls):
             int(prospective.x - radius), int(prospective.y - radius),
             int(radius * 2), int(radius * 2),
         )
-        if not any(rect.colliderect(w.rect) for w in walls):
+        if not any(rect.colliderect(o.rect) for o in obstacles):
             return step
 
     return pygame.Vector2(0, 0)
 
 
-def line_of_sight(a, b, walls, step=10):
+def line_of_sight(a, b, obstacles, step=10):
     a = pygame.Vector2(a)
     b = pygame.Vector2(b)
     dist = a.distance_to(b)
@@ -148,16 +156,16 @@ def line_of_sight(a, b, walls, step=10):
     for i in range(steps + 1):
         t = i / steps
         point = a.lerp(b, t)
-        for w in walls:
-            if w.rect.collidepoint(point.x, point.y):
+        for o in obstacles:
+            if o.rect.collidepoint(point.x, point.y):
                 return False
     return True
 
 
-def compute_cover_points(walls, margin=28):
+def compute_cover_points(obstacles, margin=28):
     points = []
-    for w in walls:
-        r = w.rect
+    for o in obstacles:
+        r = o.rect
         candidates = [
             (r.left - margin, r.top - margin), (r.right + margin, r.top - margin),
             (r.left - margin, r.bottom + margin), (r.right + margin, r.bottom + margin),
@@ -171,11 +179,11 @@ def compute_cover_points(walls, margin=28):
     return points
 
 
-def pick_cover_point(pos, player_pos, cover_points, walls, min_dist_from_player=130):
+def pick_cover_point(pos, player_pos, cover_points, obstacles, min_dist_from_player=130):
     best = None
     best_dist = float("inf")
     for cp in cover_points:
-        if line_of_sight(cp, player_pos, walls):
+        if line_of_sight(cp, player_pos, obstacles):
             continue
         if distance(cp, player_pos) < min_dist_from_player:
             continue
@@ -251,6 +259,124 @@ def get_wall_layout(level):
 
 
 # ---------------------------------------------------------------------------
+# Barrels, pickups, explosions
+# ---------------------------------------------------------------------------
+class Barrel:
+    def __init__(self, pos):
+        self.pos = pygame.Vector2(pos)
+        self.radius = 18
+        self.rect = pygame.Rect(
+            int(self.pos.x - self.radius), int(self.pos.y - self.radius),
+            int(self.radius * 2), int(self.radius * 2),
+        )
+        self.max_health = 40
+        self.health = self.max_health
+        self.alive = True
+        self.exploded = False
+        self.explosion_handled = False
+        self.blast_radius = 110
+        self.blast_damage = 90
+
+    def take_damage(self, amount):
+        if not self.alive:
+            return
+        self.health -= amount
+        if self.health <= 0:
+            self.alive = False
+            self.exploded = True
+
+    def draw(self, surface):
+        rect = pygame.Rect(
+            int(self.pos.x - self.radius), int(self.pos.y - self.radius),
+            int(self.radius * 2), int(self.radius * 2),
+        )
+        pygame.draw.rect(surface, BARREL_COLOR, rect, border_radius=5)
+        pygame.draw.rect(surface, BARREL_DARK, rect, 3, border_radius=5)
+        pygame.draw.line(surface, BARREL_DARK, (rect.left + 3, rect.centery), (rect.right - 3, rect.centery), 2)
+        pygame.draw.circle(surface, BARREL_WARN, (int(self.pos.x), int(self.pos.y) - 6), 5)
+
+        bar_width = 30
+        ratio = clamp(self.health / self.max_health, 0, 1)
+        bar_x = self.pos.x - bar_width // 2
+        bar_y = self.pos.y - self.radius - 10
+        pygame.draw.rect(surface, GRAY, (bar_x, bar_y, bar_width, 5))
+        pygame.draw.rect(surface, BARREL_WARN, (bar_x, bar_y, bar_width * ratio, 5))
+
+
+def generate_barrels(walls, count=4, min_dist_from_center=150):
+    barrels = []
+    tries = 0
+    center = (SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+    while len(barrels) < count and tries < 300:
+        tries += 1
+        x = random.uniform(70, SCREEN_WIDTH - 70)
+        y = random.uniform(70, SCREEN_HEIGHT - 70)
+        if distance((x, y), center) < min_dist_from_center:
+            continue
+        test_rect = pygame.Rect(x - 20, y - 20, 40, 40)
+        if any(test_rect.colliderect(w.rect) for w in walls):
+            continue
+        if any(test_rect.colliderect(b.rect) for b in barrels):
+            continue
+        barrels.append(Barrel((x, y)))
+    return barrels
+
+
+class Pickup:
+    def __init__(self, pos, kind):
+        self.pos = pygame.Vector2(pos)
+        self.kind = kind  # "health" or "ammo"
+        self.radius = 13
+        self.lifetime = 600
+        self.alive = True
+        self.bob_timer = random.randint(0, 100)
+
+    def update(self):
+        self.lifetime -= 1
+        self.bob_timer += 1
+        if self.lifetime <= 0:
+            self.alive = False
+
+    def draw(self, surface):
+        bob = math.sin(self.bob_timer * 0.1) * 3
+        cx = int(self.pos.x)
+        cy = int(self.pos.y + bob)
+
+        if self.kind == "health":
+            pygame.draw.circle(surface, HEALTH_PICKUP, (cx, cy), self.radius)
+            pygame.draw.circle(surface, WHITE, (cx, cy), self.radius, 2)
+            pygame.draw.line(surface, WHITE, (cx - 6, cy), (cx + 6, cy), 3)
+            pygame.draw.line(surface, WHITE, (cx, cy - 6), (cx, cy + 6), 3)
+        else:
+            pygame.draw.circle(surface, AMMO_PICKUP, (cx, cy), self.radius)
+            pygame.draw.circle(surface, (120, 100, 20), (cx, cy), self.radius, 2)
+            pygame.draw.rect(surface, (80, 60, 10), (cx - 3, cy - 7, 6, 14))
+
+        if self.lifetime < 120 and (self.lifetime // 8) % 2 == 0:
+            pygame.draw.circle(surface, WHITE, (cx, cy), self.radius + 3, 1)
+
+
+class Explosion:
+    def __init__(self, pos, radius):
+        self.pos = pygame.Vector2(pos)
+        self.radius = radius
+        self.duration = 18
+        self.timer = self.duration
+        self.alive = True
+
+    def update(self):
+        self.timer -= 1
+        if self.timer <= 0:
+            self.alive = False
+
+    def draw(self, surface):
+        progress = 1 - (self.timer / self.duration)
+        r = max(4, int(self.radius * progress))
+        pygame.draw.circle(surface, BLAST_COLOR, (int(self.pos.x), int(self.pos.y)), r, 4)
+        pygame.draw.circle(surface, BLAST_CORE, (int(self.pos.x), int(self.pos.y)), max(4, int(r * 0.35)))
+
+
+# ---------------------------------------------------------------------------
 # High score persistence
 # ---------------------------------------------------------------------------
 def load_high_scores():
@@ -321,6 +447,18 @@ def _perk_dash_master(p):
     p.dash_cooldown_multiplier *= 0.75
 
 
+def _perk_piercing_rounds(p):
+    p.bonus_pierce += 1
+
+
+def _perk_steady_aim(p):
+    p.bullet_speed_multiplier *= 1.1
+
+
+def _perk_bulk_ammo(p):
+    p.magazine_bonus += 3
+
+
 PERKS_POOL = [
     ("Adrenaline Rush", "+15% move speed", _perk_adrenaline),
     ("Quick Hands", "-20% reload time", _perk_quick_hands),
@@ -330,6 +468,9 @@ PERKS_POOL = [
     ("Scavenger", "+25% money from kills", _perk_scavenger),
     ("Grenadier", "-25% grenade cooldown", _perk_grenadier),
     ("Dash Master", "-25% dash cooldown", _perk_dash_master),
+    ("Piercing Rounds", "+1 bullet pierce, all weapons", _perk_piercing_rounds),
+    ("Steady Aim", "+10% bullet speed", _perk_steady_aim),
+    ("Bulk Ammo", "+3 magazine capacity, all weapons", _perk_bulk_ammo),
 ]
 
 
@@ -340,7 +481,7 @@ class Weapon:
     def __init__(self, name, unlocked, unlock_cost, base_damage, damage_per_level,
                  base_cooldown, cooldown_per_level, min_cooldown,
                  bullet_speed, pellets, spread_degrees, color, upgrade_base_cost,
-                 magazine_size, reload_frames):
+                 magazine_size, reload_frames, pierce=0):
         self.name = name
         self.unlocked = unlocked
         self.unlock_cost = unlock_cost
@@ -358,6 +499,7 @@ class Weapon:
         self.max_level = 5
         self.magazine_size = magazine_size
         self.reload_frames = reload_frames
+        self.pierce = pierce
 
     @property
     def damage(self):
@@ -403,6 +545,15 @@ def make_default_weapons():
             color=(120, 220, 255), upgrade_base_cost=90,
             magazine_size=30, reload_frames=95,
         ),
+        "sniper": Weapon(
+            name="Sniper", unlocked=False, unlock_cost=300,
+            base_damage=90, damage_per_level=25,
+            base_cooldown=55, cooldown_per_level=4, min_cooldown=35,
+            bullet_speed=22, pellets=1, spread_degrees=0,
+            color=SNIPER_COLOR, upgrade_base_cost=110,
+            magazine_size=5, reload_frames=110,
+            pierce=2,
+        ),
     }
 
 
@@ -422,7 +573,7 @@ class Player:
         self.last_move_dir = pygame.Vector2(1, 0)
 
         self.weapons = make_default_weapons()
-        self.weapon_order = ["pistol", "shotgun", "rifle"]
+        self.weapon_order = ["pistol", "shotgun", "rifle", "sniper"]
         self.current_weapon_key = "pistol"
 
         self.ammo = {key: w.magazine_size if w.unlocked else 0 for key, w in self.weapons.items()}
@@ -430,7 +581,6 @@ class Player:
         self.reload_timer = 0
         self.reload_weapon_key = None
 
-        # Dash
         self.dash_cooldown_max = 90
         self.dash_timer = 0
         self.dashing = False
@@ -440,11 +590,9 @@ class Player:
         self.dash_direction = pygame.Vector2(1, 0)
         self.invulnerable = False
 
-        # Grenades
         self.grenade_cooldown_max = 480
         self.grenade_timer = 0
 
-        # Perk-affected multipliers (permanent for the run)
         self.damage_multiplier = 1.0
         self.damage_reduction = 0.0
         self.lifesteal_per_kill = 0
@@ -452,16 +600,22 @@ class Player:
         self.reload_multiplier = 1.0
         self.dash_cooldown_multiplier = 1.0
         self.grenade_cooldown_multiplier = 1.0
+        self.bonus_pierce = 0
+        self.bullet_speed_multiplier = 1.0
+        self.magazine_bonus = 0
         self.perks_taken = []
 
     @property
     def current_weapon(self):
         return self.weapons[self.current_weapon_key]
 
+    def effective_magazine(self, weapon):
+        return weapon.magazine_size + self.magazine_bonus
+
     def ensure_ammo_initialized(self, weapon_key):
         weapon = self.weapons[weapon_key]
         if weapon_key not in self.ammo or self.ammo[weapon_key] == 0:
-            self.ammo[weapon_key] = weapon.magazine_size
+            self.ammo[weapon_key] = self.effective_magazine(weapon)
 
     def switch_weapon(self, key):
         if key in self.weapons and self.weapons[key].unlocked:
@@ -472,7 +626,7 @@ class Player:
         weapon = self.current_weapon
         if self.reloading:
             return
-        if self.ammo[self.current_weapon_key] >= weapon.magazine_size:
+        if self.ammo[self.current_weapon_key] >= self.effective_magazine(weapon):
             return
         self.reloading = True
         self.reload_weapon_key = self.current_weapon_key
@@ -496,7 +650,7 @@ class Player:
         grenades.append(Grenade(self.pos, target_pos))
         self.grenade_timer = int(self.grenade_cooldown_max * self.grenade_cooldown_multiplier)
 
-    def handle_input(self, keys, walls):
+    def handle_input(self, keys, obstacles):
         prev_pos = pygame.Vector2(self.pos)
 
         move = pygame.Vector2(0, 0)
@@ -514,14 +668,14 @@ class Player:
 
         if self.dashing:
             step = self.dash_direction * (self.speed * self.dash_speed_multiplier)
-            move_with_collision(self.pos, step, self.radius, walls)
+            move_with_collision(self.pos, step, self.radius, obstacles)
             self.dash_frames_left -= 1
             if self.dash_frames_left <= 0:
                 self.dashing = False
                 self.invulnerable = False
         elif move.length_squared() > 0:
             scaled = move.normalize() * self.speed
-            move_with_collision(self.pos, scaled, self.radius, walls)
+            move_with_collision(self.pos, scaled, self.radius, obstacles)
 
         self.pos.x = clamp(self.pos.x, self.radius, SCREEN_WIDTH - self.radius)
         self.pos.y = clamp(self.pos.y, self.radius, SCREEN_HEIGHT - self.radius)
@@ -538,7 +692,7 @@ class Player:
         if self.reloading:
             self.reload_timer -= 1
             if self.reload_timer <= 0:
-                self.ammo[self.reload_weapon_key] = self.weapons[self.reload_weapon_key].magazine_size
+                self.ammo[self.reload_weapon_key] = self.effective_magazine(self.weapons[self.reload_weapon_key])
                 self.reloading = False
                 self.reload_weapon_key = None
 
@@ -561,6 +715,8 @@ class Player:
         pellets = weapon.pellets
         spread = math.radians(weapon.spread_degrees)
         effective_damage = weapon.damage * self.damage_multiplier
+        effective_speed = weapon.bullet_speed * self.bullet_speed_multiplier
+        effective_pierce = weapon.pierce + self.bonus_pierce
         for i in range(pellets):
             if pellets == 1:
                 offset = 0
@@ -571,7 +727,7 @@ class Player:
             barrel_offset = direction * (self.radius + 5)
             bullet_pos = self.pos + barrel_offset
             bullets.append(Bullet(bullet_pos, direction, effective_damage,
-                                   weapon.bullet_speed, weapon.color))
+                                   effective_speed, weapon.color, pierce=effective_pierce))
 
     def take_damage(self, amount):
         if self.invulnerable:
@@ -579,6 +735,17 @@ class Player:
         amount = amount * (1 - self.damage_reduction)
         self.health -= amount
         self.health = clamp(self.health, 0, self.max_health)
+
+    def heal(self, amount):
+        self.health = clamp(self.health + amount, 0, self.max_health)
+
+    def refill_all_ammo(self):
+        for key, weapon in self.weapons.items():
+            if weapon.unlocked:
+                self.ammo[key] = self.effective_magazine(weapon)
+        if self.reloading:
+            self.reloading = False
+            self.reload_timer = 0
 
     def draw(self, surface):
         color = DASH_GREEN if self.dashing else GREEN
@@ -593,16 +760,17 @@ class Player:
 # Bullet, enemy projectile & grenade
 # ---------------------------------------------------------------------------
 class Bullet:
-    def __init__(self, pos, direction, damage, speed, color):
+    def __init__(self, pos, direction, damage, speed, color, pierce=0):
         self.pos = pygame.Vector2(pos)
         self.direction = direction
         self.speed = speed
         self.radius = 4
         self.damage = damage
         self.color = color
+        self.pierce = pierce
         self.alive = True
 
-    def update(self, walls):
+    def update(self, obstacles):
         self.pos += self.direction * self.speed
         if (
             self.pos.x < 0 or self.pos.x > SCREEN_WIDTH
@@ -614,10 +782,14 @@ class Bullet:
             int(self.pos.x - self.radius), int(self.pos.y - self.radius),
             int(self.radius * 2), int(self.radius * 2),
         )
-        if any(rect.colliderect(w.rect) for w in walls):
+        if any(rect.colliderect(o.rect) for o in obstacles):
             self.alive = False
 
     def draw(self, surface):
+        if self.pierce > 0:
+            # Slightly longer, brighter tracer for piercing rounds.
+            tail = self.pos - self.direction * 10
+            pygame.draw.line(surface, self.color, tail, self.pos, 3)
         pygame.draw.circle(surface, self.color, (int(self.pos.x), int(self.pos.y)), self.radius)
 
 
@@ -630,7 +802,7 @@ class Spit:
         self.damage = damage
         self.alive = True
 
-    def update(self, walls):
+    def update(self, obstacles):
         self.pos += self.direction * self.speed
         if (
             self.pos.x < 0 or self.pos.x > SCREEN_WIDTH
@@ -642,7 +814,7 @@ class Spit:
             int(self.pos.x - self.radius), int(self.pos.y - self.radius),
             int(self.radius * 2), int(self.radius * 2),
         )
-        if any(rect.colliderect(w.rect) for w in walls):
+        if any(rect.colliderect(o.rect) for o in obstacles):
             self.alive = False
 
     def draw(self, surface):
@@ -651,12 +823,6 @@ class Spit:
 
 
 class Grenade:
-    """
-    A thrown weapon that arcs to the target point (ignoring wall collision
-    in flight, like a real throw) and detonates in an AoE radius, either on
-    arrival or when its fuse runs out.
-    """
-
     def __init__(self, pos, target, speed=9, damage=85, radius=95, fuse_frames=45):
         self.pos = pygame.Vector2(pos)
         target = pygame.Vector2(target)
@@ -674,13 +840,12 @@ class Grenade:
         self.damage_applied = False
         self.alive = True
 
-    def update(self, walls):
+    def update(self):
         if self.exploded:
             self.explosion_timer -= 1
             if self.explosion_timer <= 0:
                 self.alive = False
             return
-
         self.pos += self.direction * self.speed
         self.traveled += self.speed
         self.fuse -= 1
@@ -716,10 +881,10 @@ class Zombie:
         self.is_boss = False
         self.score_value = 10
 
-    def update(self, player_pos, walls):
-        step = steer_toward(self.pos, player_pos, self.speed, self.radius, walls)
+    def update(self, player_pos, obstacles):
+        step = steer_toward(self.pos, player_pos, self.speed, self.radius, obstacles)
         if step.length_squared() > 0:
-            move_with_collision(self.pos, step, self.radius, walls)
+            move_with_collision(self.pos, step, self.radius, obstacles)
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
 
@@ -784,11 +949,11 @@ class Spitter(Zombie):
         self.retreat_timer = 0
         self.cover_target = None
 
-    def update(self, player_pos, player_velocity, walls, cover_points):
+    def update(self, player_pos, player_velocity, obstacles, cover_points):
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
 
-        los = line_of_sight(self.pos, player_pos, walls)
+        los = line_of_sight(self.pos, player_pos, obstacles)
         dist_to_player = distance(self.pos, player_pos)
         fired_projectile = None
 
@@ -807,18 +972,18 @@ class Spitter(Zombie):
                     self.aiming = False
                     self.attack_cooldown = self.attack_cooldown_max
                     self.retreat_timer = self.retreat_duration
-                    self.cover_target = pick_cover_point(self.pos, player_pos, cover_points, walls)
+                    self.cover_target = pick_cover_point(self.pos, player_pos, cover_points, obstacles)
             return fired_projectile
 
         if self.retreat_timer > 0:
             self.retreat_timer -= 1
             target = self.cover_target
             if target is None:
-                self.cover_target = pick_cover_point(self.pos, player_pos, cover_points, walls)
+                self.cover_target = pick_cover_point(self.pos, player_pos, cover_points, obstacles)
             elif distance(self.pos, target) > 8:
-                step = steer_toward(self.pos, target, self.speed, self.radius, walls)
+                step = steer_toward(self.pos, target, self.speed, self.radius, obstacles)
                 if step.length_squared() > 0:
-                    move_with_collision(self.pos, step, self.radius, walls)
+                    move_with_collision(self.pos, step, self.radius, obstacles)
             return fired_projectile
 
         if dist_to_player < self.min_range:
@@ -826,16 +991,16 @@ class Spitter(Zombie):
             if away.length_squared() > 0:
                 away = away.normalize()
             target_point = pygame.Vector2(self.pos) + away * 100
-            step = steer_toward(self.pos, target_point, self.speed, self.radius, walls)
+            step = steer_toward(self.pos, target_point, self.speed, self.radius, obstacles)
             if step.length_squared() > 0:
-                move_with_collision(self.pos, step, self.radius, walls)
+                move_with_collision(self.pos, step, self.radius, obstacles)
         elif los and self.min_range <= dist_to_player <= self.attack_range and self.attack_cooldown <= 0:
             self.aiming = True
             self.aim_timer = self.aim_time
         else:
-            step = steer_toward(self.pos, player_pos, self.speed, self.radius, walls)
+            step = steer_toward(self.pos, player_pos, self.speed, self.radius, obstacles)
             if step.length_squared() > 0:
-                move_with_collision(self.pos, step, self.radius, walls)
+                move_with_collision(self.pos, step, self.radius, obstacles)
 
         return fired_projectile
 
@@ -921,7 +1086,6 @@ class Game:
     def __init__(self):
         self.high_scores = load_high_scores()
         self.walls = []
-        self.cover_points = []
         self.reset()
 
     def reset(self):
@@ -930,6 +1094,9 @@ class Game:
         self.zombies = []
         self.enemy_projectiles = []
         self.grenades = []
+        self.barrels = []
+        self.pickups = []
+        self.explosions = []
         self.score = 0
         self.money = 60
         self.level = 1
@@ -951,7 +1118,6 @@ class Game:
     def begin_level(self, level_number):
         self.level = level_number
         self.walls = get_wall_layout(level_number)
-        self.cover_points = compute_cover_points(self.walls)
 
         self.player.pos = pygame.Vector2(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
         self.player.velocity = pygame.Vector2(0, 0)
@@ -962,6 +1128,9 @@ class Game:
         self.zombies = []
         self.enemy_projectiles = []
         self.grenades = []
+        self.pickups = []
+        self.explosions = []
+        self.barrels = generate_barrels(self.walls, count=min(3 + level_number // 4, 6))
 
         spitter_count = 0
         if level_number >= 3:
@@ -1007,11 +1176,14 @@ class Game:
         if self.state != Game.STATE_PLAYING:
             return
 
+        obstacles = self.walls + [b for b in self.barrels if b.alive]
+        cover_points = compute_cover_points(obstacles)
+
         keys = pygame.key.get_pressed()
         mouse_pos = pygame.mouse.get_pos()
         mouse_buttons = pygame.mouse.get_pressed()
 
-        self.player.handle_input(keys, self.walls)
+        self.player.handle_input(keys, obstacles)
         self.player.update_aim(mouse_pos)
 
         if mouse_buttons[0]:
@@ -1033,16 +1205,16 @@ class Game:
             return
 
         for bullet in self.bullets:
-            bullet.update(self.walls)
+            bullet.update(obstacles)
         self.bullets = [b for b in self.bullets if b.alive]
 
         for zombie in self.zombies:
             if isinstance(zombie, Spitter):
-                projectile = zombie.update(self.player.pos, self.player.velocity, self.walls, self.cover_points)
+                projectile = zombie.update(self.player.pos, self.player.velocity, obstacles, cover_points)
                 if projectile is not None:
                     self.enemy_projectiles.append(projectile)
             else:
-                zombie.update(self.player.pos, self.walls)
+                zombie.update(self.player.pos, obstacles)
 
             if distance(zombie.pos, self.player.pos) < zombie.radius + self.player.radius:
                 if zombie.attack_cooldown <= 0:
@@ -1050,7 +1222,7 @@ class Game:
                     zombie.attack_cooldown = 45
 
         for projectile in self.enemy_projectiles:
-            projectile.update(self.walls)
+            projectile.update(obstacles)
             if projectile.alive and distance(projectile.pos, self.player.pos) < projectile.radius + self.player.radius:
                 self.player.take_damage(projectile.damage)
                 projectile.alive = False
@@ -1060,30 +1232,78 @@ class Game:
             self.score += zombie.score_value
             self.money += int(zombie.reward * self.player.money_multiplier)
             if self.player.lifesteal_per_kill > 0:
-                self.player.health = clamp(
-                    self.player.health + self.player.lifesteal_per_kill, 0, self.player.max_health
-                )
+                self.player.heal(self.player.lifesteal_per_kill)
+            if random.random() < 0.12:
+                kind = random.choice(["health", "ammo"])
+                self.pickups.append(Pickup(zombie.pos, kind))
 
         for bullet in self.bullets:
+            if not bullet.alive:
+                continue
+            hit_barrel = False
+            for barrel in self.barrels:
+                if barrel.alive and distance(bullet.pos, barrel.pos) < barrel.radius + bullet.radius:
+                    barrel.take_damage(bullet.damage)
+                    bullet.alive = False
+                    hit_barrel = True
+                    break
+            if hit_barrel:
+                continue
             for zombie in self.zombies:
                 if zombie.alive and distance(bullet.pos, zombie.pos) < zombie.radius + bullet.radius:
                     zombie.take_damage(bullet.damage)
-                    bullet.alive = False
                     if not zombie.alive:
                         award_kill(zombie)
-                    break
+                    if bullet.pierce > 0:
+                        bullet.pierce -= 1
+                    else:
+                        bullet.alive = False
+                        break
         self.bullets = [b for b in self.bullets if b.alive]
 
         for grenade in self.grenades:
-            grenade.update(self.walls)
+            grenade.update()
             if grenade.exploded and not grenade.damage_applied:
                 for zombie in self.zombies:
                     if zombie.alive and distance(grenade.pos, zombie.pos) <= grenade.radius:
                         zombie.take_damage(grenade.damage)
                         if not zombie.alive:
                             award_kill(zombie)
+                for barrel in self.barrels:
+                    if barrel.alive and distance(grenade.pos, barrel.pos) <= grenade.radius:
+                        barrel.take_damage(grenade.damage)
                 grenade.damage_applied = True
         self.grenades = [g for g in self.grenades if g.alive]
+
+        for barrel in self.barrels:
+            if barrel.exploded and not barrel.explosion_handled:
+                barrel.explosion_handled = True
+                self.explosions.append(Explosion(barrel.pos, barrel.blast_radius))
+                for zombie in self.zombies:
+                    if zombie.alive and distance(barrel.pos, zombie.pos) <= barrel.blast_radius:
+                        zombie.take_damage(barrel.blast_damage)
+                        if not zombie.alive:
+                            award_kill(zombie)
+                if distance(barrel.pos, self.player.pos) <= barrel.blast_radius:
+                    self.player.take_damage(45)
+                for other in self.barrels:
+                    if other is not barrel and other.alive and distance(barrel.pos, other.pos) <= barrel.blast_radius:
+                        other.take_damage(999)
+        self.barrels = [b for b in self.barrels if b.alive]
+
+        for explosion in self.explosions:
+            explosion.update()
+        self.explosions = [e for e in self.explosions if e.alive]
+
+        for pickup in self.pickups:
+            pickup.update()
+            if pickup.alive and distance(pickup.pos, self.player.pos) < pickup.radius + self.player.radius:
+                if pickup.kind == "health":
+                    self.player.heal(30)
+                else:
+                    self.player.refill_all_ammo()
+                pickup.alive = False
+        self.pickups = [p for p in self.pickups if p.alive]
 
         self.zombies = [z for z in self.zombies if z.alive]
 
@@ -1133,9 +1353,10 @@ class Game:
         options.append(make_upgrade_option(pygame.K_1, "1", "pistol"))
         options.append(make_upgrade_option(pygame.K_2, "2", "shotgun"))
         options.append(make_upgrade_option(pygame.K_3, "3", "rifle"))
+        options.append(make_upgrade_option(pygame.K_4, "4", "sniper"))
 
         def health_label():
-            return f"[4] Increase Max Health (+20)  (currently {self.player.max_health})"
+            return f"[5] Increase Max Health (+20)  (currently {self.player.max_health})"
 
         def health_cost():
             return int(35 * (1.4 ** ((self.player.max_health - 100) / 20)))
@@ -1151,10 +1372,10 @@ class Game:
             self.player.max_health += 20
             self.player.health = self.player.max_health
 
-        options.append(ShopOption(pygame.K_4, health_label, health_cost, health_action, health_enabled))
+        options.append(ShopOption(pygame.K_5, health_label, health_cost, health_action, health_enabled))
 
         def heal_label():
-            return "[5] Full Heal"
+            return "[6] Full Heal"
 
         def heal_cost():
             return 25
@@ -1169,7 +1390,7 @@ class Game:
             self.money -= c
             self.player.health = self.player.max_health
 
-        options.append(ShopOption(pygame.K_5, heal_label, heal_cost, heal_action, heal_enabled))
+        options.append(ShopOption(pygame.K_6, heal_label, heal_cost, heal_action, heal_enabled))
 
         return options
 
@@ -1178,7 +1399,7 @@ class Game:
             self.begin_level(self.level + 1)
             return
 
-        perk_keys = {pygame.K_6: 0, pygame.K_7: 1, pygame.K_8: 2}
+        perk_keys = {pygame.K_7: 0, pygame.K_8: 1, pygame.K_9: 2}
         if key in perk_keys and not self.perk_chosen_this_level:
             idx = perk_keys[key]
             if idx < len(self.perk_choices):
@@ -1206,6 +1427,10 @@ class Game:
 
         for wall in self.walls:
             wall.draw(surface)
+        for barrel in self.barrels:
+            barrel.draw(surface)
+        for pickup in self.pickups:
+            pickup.draw(surface)
 
         for zombie in self.zombies:
             zombie.draw(surface)
@@ -1216,6 +1441,9 @@ class Game:
         for grenade in self.grenades:
             grenade.draw(surface)
         self.player.draw(surface)
+
+        for explosion in self.explosions:
+            explosion.draw(surface)
 
         self.draw_hud(surface)
 
@@ -1253,34 +1481,34 @@ class Game:
 
         weapon = self.player.current_weapon
         weapon_text = font_small.render(
-            f"Weapon: {weapon.name} (Lv {weapon.level})   [1/2/3 to switch]", True, weapon.color
+            f"Weapon: {weapon.name} (Lv {weapon.level})   [1/2/3/4 to switch]", True, weapon.color
         )
         surface.blit(weapon_text, (20, SCREEN_HEIGHT - 116))
 
         ammo = self.player.ammo[self.player.current_weapon_key]
+        effective_mag = self.player.effective_magazine(weapon)
         if self.player.reloading:
             ammo_str = "RELOADING..."
             ammo_color = RED
-            progress = 1 - (self.player.reload_timer / max(1, int(weapon.reload_frames * self.player.reload_multiplier)))
+            reload_total = max(1, int(weapon.reload_frames * self.player.reload_multiplier))
+            progress = 1 - (self.player.reload_timer / reload_total)
             bar_w = 160
             pygame.draw.rect(surface, GRAY, (20, SCREEN_HEIGHT - 92, bar_w, 10))
             pygame.draw.rect(surface, GOLD, (20, SCREEN_HEIGHT - 92, bar_w * clamp(progress, 0, 1), 10))
         else:
-            ammo_str = f"Ammo: {ammo}/{weapon.magazine_size}   [R to reload]"
+            ammo_str = f"Ammo: {ammo}/{effective_mag}   [R to reload]"
             ammo_color = WHITE if ammo > 0 else RED
         ammo_text = font_small.render(ammo_str, True, ammo_color)
         surface.blit(ammo_text, (20, SCREEN_HEIGHT - 90))
 
-        # Dash indicator
         dash_ready = self.player.dash_timer <= 0 and not self.player.dashing
         dash_color = DASH_GREEN if dash_ready else GRAY
         dash_str = "[SPACE] Dash: READY" if dash_ready else f"[SPACE] Dash: {self.player.dash_timer / FPS:.1f}s"
         dash_text = font_small.render(dash_str, True, dash_color)
         surface.blit(dash_text, (20, SCREEN_HEIGHT - 60))
 
-        # Grenade indicator
         grenade_ready = self.player.grenade_timer <= 0
-        grenade_color = GRENADE_COLOR if not grenade_ready else (170, 210, 120)
+        grenade_color = (170, 210, 120) if grenade_ready else GRENADE_COLOR
         grenade_str = "[G] Grenade: READY" if grenade_ready else f"[G] Grenade: {self.player.grenade_timer / FPS:.1f}s"
         grenade_text = font_small.render(grenade_str, True, grenade_color)
         surface.blit(grenade_text, (20, SCREEN_HEIGHT - 32))
@@ -1295,17 +1523,17 @@ class Game:
         surface.blit(overlay, (0, 0))
 
         title = font_huge.render(f"LEVEL {self.level} CLEARED!", True, GOLD)
-        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 25))
+        surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 20))
 
         money_text = font_medium.render(f"Money: $ {self.money}", True, GOLD)
-        surface.blit(money_text, (SCREEN_WIDTH // 2 - money_text.get_width() // 2, 100))
+        surface.blit(money_text, (SCREEN_WIDTH // 2 - money_text.get_width() // 2, 92))
 
         subtitle = font_small.render("WEAPON SHOP", True, LIGHT_GRAY)
-        surface.blit(subtitle, (SCREEN_WIDTH // 2 - 260, 140))
+        surface.blit(subtitle, (SCREEN_WIDTH // 2 - 260, 128))
 
         options = self.build_shop_options()
-        start_y = 168
-        gap = 34
+        start_y = 154
+        gap = 30
         for i, option in enumerate(options):
             label = option.label_fn()
             cost = option.cost_fn()
@@ -1321,25 +1549,25 @@ class Game:
             text = font_small.render(line, True, color)
             surface.blit(text, (SCREEN_WIDTH // 2 - 260, start_y + i * gap))
 
-        perk_section_y = start_y + len(options) * gap + 24
+        perk_section_y = start_y + len(options) * gap + 18
         perk_subtitle = font_small.render("CHOOSE ONE PERK (free)", True, PERK_COLOR)
         surface.blit(perk_subtitle, (SCREEN_WIDTH // 2 - 260, perk_section_y))
 
         if self.perk_chosen_this_level:
             chosen_name = self.player.perks_taken[-1] if self.player.perks_taken else "?"
             chosen_text = font_small.render(f"Perk chosen: {chosen_name}", True, GOLD)
-            surface.blit(chosen_text, (SCREEN_WIDTH // 2 - 260, perk_section_y + 30))
+            surface.blit(chosen_text, (SCREEN_WIDTH // 2 - 260, perk_section_y + 28))
         else:
-            perk_keys_labels = ["6", "7", "8"]
+            perk_keys_labels = ["7", "8", "9"]
             for i, (name, desc, _fn) in enumerate(self.perk_choices):
                 line = f"[{perk_keys_labels[i]}] {name} - {desc}"
                 text = font_small.render(line, True, PERK_COLOR)
-                surface.blit(text, (SCREEN_WIDTH // 2 - 260, perk_section_y + 28 + i * 30))
+                surface.blit(text, (SCREEN_WIDTH // 2 - 260, perk_section_y + 26 + i * 28))
 
         prompt = font_medium.render("Press ENTER to start next level", True, GREEN)
         surface.blit(
             prompt,
-            (SCREEN_WIDTH // 2 - prompt.get_width() // 2, perk_section_y + 28 + 3 * 30 + 20),
+            (SCREEN_WIDTH // 2 - prompt.get_width() // 2, perk_section_y + 26 + 3 * 28 + 18),
         )
 
     def draw_game_over(self, surface):
@@ -1410,6 +1638,8 @@ def main():
                         game.player.switch_weapon("shotgun")
                     elif event.key == pygame.K_3:
                         game.player.switch_weapon("rifle")
+                    elif event.key == pygame.K_4:
+                        game.player.switch_weapon("sniper")
                     elif event.key == pygame.K_r:
                         game.player.start_reload()
                     elif event.key == pygame.K_SPACE:
@@ -1429,4 +1659,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
